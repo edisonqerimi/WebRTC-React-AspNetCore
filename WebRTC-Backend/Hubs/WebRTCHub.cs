@@ -1,12 +1,48 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.SignalR;
 
 namespace WebRTC_React_netcore.Hubs
 {
     public class WebRTCHub : Hub
     {
-        public async Task SendMessage(string user, string message)
+        private static RoomManager roomManager = new RoomManager();
+
+        public async Task CreateRoom(string name)
         {
-            await Clients.All.SendAsync("ReceiveMessage", user, message);
+            if (string.IsNullOrWhiteSpace(name)){
+                await Clients.Caller.SendAsync("error", "Group name cannot be null or empty.");
+            }
+            Room room = roomManager.CreateRoom(Context.ConnectionId, name);
+            if (room != null)
+            {
+                await Groups.AddToGroupAsync(Context.ConnectionId, room.RoomId);
+                await Clients.Caller.SendAsync("created", room);
+                List<Room> rooms = roomManager.GetAllRooms();
+                await Clients.All.SendAsync("roomUpdate", rooms);
+            }
+            else
+            {
+                await Clients.Caller.SendAsync("error", "Error occurred when creating a new room.");
+            }
+        }
+        public async Task GetRooms()
+        {
+            List<Room> rooms = roomManager.GetAllRooms();
+            await Clients.Caller.SendAsync("roomUpdate",rooms);
+        }
+        public async Task JoinRoom(string roomId)
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
+        }
+        public async Task LeaveRoom(string roomId)
+        {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomId);
+        }
+        public async Task DeleteRoom(string roomId)
+        {
+            roomManager.DeleteRoom(roomId);
+            List<Room> rooms = roomManager.GetAllRooms();
+            await Clients.All.SendAsync("roomUpdate", rooms);
         }
     }
 }
