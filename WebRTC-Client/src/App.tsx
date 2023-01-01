@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import "./App.css";
 import {
   HubConnectionBuilder,
@@ -7,7 +7,7 @@ import {
   HubConnectionState,
 } from "@microsoft/signalr";
 
-import { Button, TextField,Box, TableContainer } from "@mui/material";
+import { Button, TextField,Box } from "@mui/material";
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 
 interface Room {
@@ -17,15 +17,15 @@ interface Room {
 }
 function App() {
   const [groupName, setGroupName] = useState<String|null>(null);
-  const [connectionStatus,setConnectionStatus] = useState("");
+  const [connectionStatus,setConnectionStatus] = useState<String>("");
   const [currentRoom,setCurrentRoom]=useState<Room|null>(null);
   const [rooms,setRooms] = useState<Array<Room>|[]>([]);
   let connection = useRef<HubConnection>();
-  const columns = useMemo(()=>[
+  const columns = useMemo<GridColDef[]>(()=>[
     { field: 'roomId', headerName: 'Room Id',width:300 },
     { field: 'name', headerName: 'Room Name',width:200},
     { field: 'hostConnectionId', headerName: 'Host Connection Id',width:300},
-    { field:"delete", headerName:"Delete", renderCell:(params:any)=> 
+    { field:"delete", headerName:"Delete", renderCell:(params)=> 
           <Button 
           // disabled={params.row.hostConnectionId!==connection.current?.connectionId} // disabled if not hoster
         
@@ -37,7 +37,7 @@ function App() {
             Delete
           </Button>
     },
-    { field:"join", headerName:"Join", renderCell:(params:any)=> 
+    { field:"join", headerName:"Join", renderCell:(params)=> 
           <Button
           disabled={params.row.roomId===currentRoom?.roomId} // disable joined group
           size="large"
