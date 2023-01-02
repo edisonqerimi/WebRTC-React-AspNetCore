@@ -17,6 +17,7 @@ namespace WebRTC_React_netcore.Hubs
             {
                 await Groups.AddToGroupAsync(Context.ConnectionId, room.RoomId);
                 await Clients.Caller.SendAsync("created", room);
+                await Clients.Group(room.RoomId).SendAsync("ready");
                 List<Room> rooms = roomManager.GetAllRooms();
                 await Clients.All.SendAsync("roomUpdate", rooms);
             }
@@ -33,6 +34,7 @@ namespace WebRTC_React_netcore.Hubs
         public async Task JoinRoom(string roomId)
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
+            await Clients.Group(roomId).SendAsync("ready");
         }
         public async Task LeaveRoom(string roomId)
         {
