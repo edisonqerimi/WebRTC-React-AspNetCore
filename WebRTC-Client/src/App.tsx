@@ -25,7 +25,7 @@ function App() {
 
   const [devices, setDevices] = useState<MediaDeviceInfo[] | []>([]);
 
-  const videoRef=useRef<HTMLVideoElement>();
+  const videoRef=useRef<HTMLVideoElement|null>(null);
 
   const columns = useMemo<GridColDef[]>(
     () => [
