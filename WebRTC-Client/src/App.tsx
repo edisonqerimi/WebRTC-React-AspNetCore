@@ -25,7 +25,7 @@ function App() {
 
   const [devices, setDevices] = useState<MediaDeviceInfo[] | []>([]);
 
-  const [stream, setStream] = useState<any>(null);
+  const videoRef=useRef<HTMLVideoElement>();
 
   const columns = useMemo<GridColDef[]>(
     () => [
@@ -73,12 +73,11 @@ function App() {
     navigator.mediaDevices
       .getUserMedia({
         video: true,
-        audio: true
+        // audio: true // audio not working rn
       })
       .then((stream) => {
         console.log(stream);
-
-        setStream(stream);
+        videoRef.current!.srcObject = stream;
       })
       .catch((error) => {
         console.error("Error accessing media devices.", error);
@@ -258,7 +257,7 @@ function App() {
           </Box>
         ))}
       </Box>
-      <video autoPlay src={stream} playsInline></video>
+      <video autoPlay width={500} height={400} ref={videoRef} playsInline></video>
       <div style={{ height: 560, width: "100%" }}>
         <DataGrid
           rows={rooms}
