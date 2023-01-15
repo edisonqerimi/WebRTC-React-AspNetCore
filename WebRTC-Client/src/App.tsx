@@ -26,6 +26,10 @@ function App() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[] | []>([]);
 
+  const [message, setMessage] = useState<string>("");
+
+  const [recievedMessage, setRecievedMessage] = useState<string>("");
+
   let isInitiator = useRef<Boolean>(false);
 
   let dataChannel = useRef<RTCDataChannel | undefined>();
@@ -89,7 +93,7 @@ function App() {
     navigator.mediaDevices
       .getUserMedia({
         video: true,
-        audio: true, 
+        audio: true,
       })
       .then((stream) => {
         videoRef.current!.srcObject = stream;
@@ -223,26 +227,25 @@ function App() {
     peerConnection.current!.setLocalDescription(desc);
   };
 
-  function onDataChannelCreated(channel: any) {
+  const onDataChannelCreated = (channel: any) => {
     console.log("onDataChannelCreated:", channel);
 
-    channel.onopen = function () {
+    channel.onopen = () => {
       console.log("Channel opened!!!");
       setConnectionStatus("Channel opened!!");
-      // fileInput.disabled = false;
     };
 
-    channel.onclose = function () {
+    channel.onclose = () => {
       console.log("Channel closed.");
       setConnectionStatus("Channel closed.");
     };
 
-    // channel.onmessage = onReceiveMessageCallback();
-  }
+    channel.onmessage = (event: any) => {
+      setRecievedMessage(event.data);
+    };
+  };
 
   const sendMessage = (message: RTCSessionDescription | null) => {
-    // console.log('Client sending message: ', message);
-    console.log(currentRoom.current);
     connection
       .current!.invoke("SendMessage", currentRoom.current?.roomId, message)
       .catch((err) => {
@@ -253,13 +256,10 @@ function App() {
   useEffect(() => {
     const unloadCallback = () => {
       if (currentRoom) {
-        console.log(
-          `Unloading window. Notifying peers in ${currentRoom.current?.roomId}.`
-        );
         connection
           .current!.invoke("LeaveRoom", currentRoom.current?.roomId)
           .catch((err) => {
-            console.error(err.toString());
+            console.log(err);
           });
       }
     };
@@ -354,6 +354,19 @@ function App() {
         .catch((err) => console.log(err));
     }
   };
+
+  const onMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMessage(e.target.value);
+  };
+
+  const onMessageSend = () => {
+    if (!message) {
+      return;
+    }
+    dataChannel.current?.send(message);
+    setMessage("");
+  };
+
   return (
     <div className="App">
       <Box>
@@ -390,7 +403,7 @@ function App() {
           </Box>
         ))}
       </Box> */}
-      <Box style={{ display: "flex", gap: 16 }}>
+      <Box style={{ display: "flex", gap: 16, marginBottom: 16 }}>
         <video
           style={{ transform: "rotateY(180deg)" }}
           autoPlay
@@ -407,6 +420,29 @@ function App() {
           ref={videoRef2}
           playsInline
         ></video>
+      </Box>
+      <Box
+        style={{
+          display: "flex",
+          gap: 16,
+          marginBottom: 8,
+          alignItems: "center",
+        }}
+      >
+        <TextField
+          size="small"
+          label="Message"
+          onChange={onMessageChange}
+          value={message}
+        />
+        <Button
+          style={{ marginRight: 8 }}
+          onClick={onMessageSend}
+          variant="contained"
+        >
+          Send
+        </Button>
+        <Box>Recieved message: {recievedMessage}</Box>
       </Box>
       <div style={{ height: 560, width: "100%" }}>
         <DataGrid
