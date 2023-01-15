@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, useLayoutEffect } from "react";
 import "./App.css";
 import {
   HubConnectionBuilder,
@@ -19,13 +19,19 @@ interface Room {
 function App() {
   const [groupName, setGroupName] = useState<String | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<String>("");
-  const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
+  let currentRoom = useRef<Room | null>(null);
   const [rooms, setRooms] = useState<Array<Room> | []>([]);
   let connection = useRef<HubConnection>();
-
+  let peerConnection = useRef<RTCPeerConnection | null>(null);
+  const [stream, setStream] = useState<MediaStream | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[] | []>([]);
 
-  const videoRef=useRef<HTMLVideoElement|null>(null);
+  let isInitiator = useRef<Boolean>(false);
+
+  let dataChannel = useRef<RTCDataChannel | undefined>();
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef2 = useRef<HTMLVideoElement | null>(null);
 
   const columns = useMemo<GridColDef[]>(
     () => [
@@ -57,7 +63,7 @@ function App() {
         headerName: "Join",
         renderCell: (params) => (
           <Button
-            disabled={params.row.roomId === currentRoom?.roomId} // disable joined group
+            disabled={params.row.roomId === currentRoom.current?.roomId} // disable joined group
             size="large"
             style={{ width: "100%", height: "100%" }}
             onClick={() => onJoinClick(params.row)}
@@ -69,15 +75,28 @@ function App() {
     ],
     [currentRoom, connection]
   );
-  useEffect(() => {
+
+  useLayoutEffect(() => {
+    peerConnection.current = new RTCPeerConnection({
+      iceServers: [
+        {
+          urls: "turn:numb.viagenie.ca",
+          credential: "muazkh",
+          username: "webrtc@live.com",
+        },
+      ],
+    });
     navigator.mediaDevices
       .getUserMedia({
         video: true,
-        // audio: true // audio not working rn
+        audio: true, 
       })
       .then((stream) => {
-        console.log(stream);
         videoRef.current!.srcObject = stream;
+        stream.getTracks().forEach((track) => {
+          peerConnection.current?.addTrack(track, stream);
+        });
+        setStream(stream);
       })
       .catch((error) => {
         console.error("Error accessing media devices.", error);
@@ -86,7 +105,7 @@ function App() {
         getDevices();
       });
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     connection.current = new HubConnectionBuilder()
       .configureLogging(LogLevel.Debug)
       .withUrl("/hubs/WebRTCHub", {
@@ -99,12 +118,16 @@ function App() {
       .start()
       .then(() => {
         connection.current!.on("created", (room) => {
-          setCurrentRoom(room);
+          currentRoom.current = room;
+          isInitiator.current = true;
           setConnectionStatus("You created room " + room.name);
         });
 
         connection.current!.on("roomUpdate", (rooms) => {
           setRooms(rooms);
+        });
+        connection.current!.on("joined", (roomId) => {
+          isInitiator.current = false;
         });
 
         connection.current!.invoke("GetRooms").catch((err) => {
@@ -113,19 +136,128 @@ function App() {
 
         connection.current!.on("ready", () => {
           console.log("ready");
+          setConnectionStatus("Connecting..");
+          createPeerConnection(isInitiator.current);
+        });
+        connection.current!.on("message", (message) => {
+          console.log("Client received message:", message);
+          signalingMessageCallback(message);
         });
       })
       .catch((err) => console.log(err));
   }, []);
 
+  const signalingMessageCallback = (message: any) => {
+    if (message.type === "offer") {
+      console.log("Got offer. Sending answer to peer.");
+      peerConnection.current?.setRemoteDescription(
+        new RTCSessionDescription(message)
+      );
+      peerConnection.current
+        ?.createAnswer()
+        .then((value) => {
+          onLocalSessionCreated(value);
+        })
+        .catch((err) => console.log(err));
+    } else if (message.type === "answer") {
+      console.log("Got answer.");
+      peerConnection.current?.setRemoteDescription(
+        new RTCSessionDescription(message)
+      );
+    } else if (message.type === "candidate") {
+      console.log("Candidate");
+      peerConnection.current?.addIceCandidate(
+        new RTCIceCandidate({
+          candidate: message.candidate,
+        })
+      );
+    }
+  };
+
+  const createPeerConnection = (isInitiator: Boolean) => {
+    // send any ice candidates to the other peer
+    peerConnection.current!.onicecandidate = (event) => {
+      console.log("icecandidate event:", event);
+      if (event.candidate) {
+        // Trickle ICE
+        //sendMessage({
+        //    type: 'candidate',
+        //    label: event.candidate.sdpMLineIndex,
+        //    id: event.candidate.sdpMid,
+        //    candidate: event.candidate.candidate
+        //});
+      } else {
+        console.log("End of candidates.");
+        // Vanilla ICE
+        sendMessage(peerConnection.current!.localDescription);
+      }
+    };
+    peerConnection.current!.ontrack = function (event) {
+      console.log("icecandidate ontrack event:", event);
+      videoRef2.current!.srcObject = event.streams[0];
+    };
+    if (isInitiator) {
+      console.log("Creating Data Channel");
+      dataChannel.current =
+        peerConnection.current?.createDataChannel("sendDataChannel");
+      onDataChannelCreated(dataChannel.current);
+
+      console.log("Creating an offer");
+      peerConnection
+        .current!.createOffer()
+        .then((value) => {
+          onLocalSessionCreated(value);
+        })
+        .catch((err) => console.log(err));
+    } else {
+      peerConnection.current!.addEventListener("datachannel", (event) => {
+        console.log("ondatachannel:", event.channel);
+        dataChannel.current = event.channel;
+        onDataChannelCreated(dataChannel.current);
+      });
+    }
+  };
+
+  const onLocalSessionCreated = (desc: RTCSessionDescriptionInit) => {
+    console.log("local session created:", desc);
+    peerConnection.current!.setLocalDescription(desc);
+  };
+
+  function onDataChannelCreated(channel: any) {
+    console.log("onDataChannelCreated:", channel);
+
+    channel.onopen = function () {
+      console.log("Channel opened!!!");
+      setConnectionStatus("Channel opened!!");
+      // fileInput.disabled = false;
+    };
+
+    channel.onclose = function () {
+      console.log("Channel closed.");
+      setConnectionStatus("Channel closed.");
+    };
+
+    // channel.onmessage = onReceiveMessageCallback();
+  }
+
+  const sendMessage = (message: RTCSessionDescription | null) => {
+    // console.log('Client sending message: ', message);
+    console.log(currentRoom.current);
+    connection
+      .current!.invoke("SendMessage", currentRoom.current?.roomId, message)
+      .catch((err) => {
+        console.log(err);
+      });
+  };
+
   useEffect(() => {
     const unloadCallback = () => {
       if (currentRoom) {
         console.log(
-          `Unloading window. Notifying peers in ${currentRoom.roomId}.`
+          `Unloading window. Notifying peers in ${currentRoom.current?.roomId}.`
         );
         connection
-          .current!.invoke("LeaveRoom", currentRoom.roomId)
+          .current!.invoke("LeaveRoom", currentRoom.current?.roomId)
           .catch((err) => {
             console.error(err.toString());
           });
@@ -185,7 +317,7 @@ function App() {
       connection.current
         ?.invoke("JoinRoom", room.roomId)
         .then(() => {
-          setCurrentRoom(room);
+          currentRoom.current = room;
           setConnectionStatus("You joined room " + room.name);
         })
         .catch((err) => console.log(err));
@@ -196,7 +328,8 @@ function App() {
       connection.current
         ?.invoke("LeaveRoom", room.roomId)
         .then(() => {
-          setCurrentRoom(null);
+          currentRoom.current = null;
+          peerConnection.current?.close();
           setConnectionStatus("You left room " + room.name);
         })
         .catch((err) => console.log(err));
@@ -204,11 +337,11 @@ function App() {
   };
   const onDeleteClick = async (row: Room) => {
     if (connection.current?.state == HubConnectionState.Connected) {
-      if (currentRoom?.roomId == row.roomId) {
+      if (currentRoom.current?.roomId == row.roomId) {
         await connection.current
-          ?.invoke("LeaveRoom", currentRoom.roomId)
+          ?.invoke("LeaveRoom", currentRoom.current.roomId)
           .then(() => {
-            setCurrentRoom(null);
+            currentRoom.current = null;
             setConnectionStatus("You left room " + row.name);
           })
           .catch((err) => console.log(err));
@@ -240,7 +373,7 @@ function App() {
         </Button>
         <Button
           disabled={currentRoom == null}
-          onClick={() => onLeaveRoom(currentRoom)}
+          onClick={() => onLeaveRoom(currentRoom.current)}
           color="error"
           variant="contained"
         >
@@ -250,14 +383,31 @@ function App() {
       <Box>
         {connection.current?.state} | {connectionStatus}
       </Box>
-      <Box>
+      {/* <Box>
         {devices.map((device) => (
           <Box>
             {device.kind}: {device.label}
           </Box>
         ))}
+      </Box> */}
+      <Box style={{ display: "flex", gap: 16 }}>
+        <video
+          style={{ transform: "rotateY(180deg)" }}
+          autoPlay
+          width={400}
+          height={300}
+          ref={videoRef}
+          playsInline
+        ></video>
+        <video
+          style={{ transform: "rotateY(180deg)" }}
+          autoPlay
+          width={400}
+          height={300}
+          ref={videoRef2}
+          playsInline
+        ></video>
       </Box>
-      <video autoPlay width={500} height={400} ref={videoRef} playsInline></video>
       <div style={{ height: 560, width: "100%" }}>
         <DataGrid
           rows={rooms}
@@ -267,7 +417,7 @@ function App() {
           rowsPerPageOptions={[5]}
           isRowSelectable={() => false}
           getRowClassName={(props) =>
-            props.id == currentRoom?.roomId ? "highlight-row" : ""
+            props.id == currentRoom.current?.roomId ? "highlight-row" : ""
           }
         />
       </div>
